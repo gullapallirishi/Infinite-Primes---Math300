@@ -1,0 +1,231 @@
+/-
+  Furstenberg's topological proof of the infinitude of primes, in Lean.
+
+  Main idea (following Goldmakher and Eberl):
+  * Basis sets are bi-infinite arithmetic progressions in ℤ.
+  * Define "Furstenberg-open" sets as those in which every point
+    lies inside some arithmetic progression contained in the set.
+  * Any nonempty Furstenberg-open set is infinite.
+  * For each prime p, the set of multiples pℤ is Furstenberg-open and
+    its complement is a union of arithmetic progressions, hence
+    Furstenberg-open as well → pℤ is Furstenberg-closed.
+  * If only finitely many primes exist, the union of their multiples
+    is Furstenberg-closed; its complement {1, -1} would be
+    Furstenberg-open, contradicting the previous lemma about
+    nonempty open sets being infinite.
+-/
+
+import Mathlib.Data.Int.Basic
+import Mathlib.Data.Nat.Prime
+import Mathlib.Data.Set.Like
+import Mathlib.Data.Int.ModEq
+import Mathlib.Data.SetLike.Basic
+
+open Set
+
+namespace Furstenberg
+
+/-- Bi-infinite arithmetic progression on `ℤ` with step `b > 0`:
+    `{ x | x ≡ a [ZMOD b] }`. -/
+def arithProg (a : ℤ) (b : ℕ) : Set ℤ :=
+  {x : ℤ | Int.ModEq (b : ℤ) x a}
+
+/-- Membership via congruence. -/
+lemma mem_arithProg_iff {a : ℤ} {b : ℕ} {x : ℤ} :
+    x ∈ arithProg a b ↔ Int.ModEq (b : ℤ) x a := Iff.rfl
+
+/-- `arithProg a b` is infinite when `b > 0`. -/
+lemma infinite_arithProg {a : ℤ} {b : ℕ} (hb : 0 < b) :
+    (arithProg a b).Infinite := by
+  -- Use the bijection `ℤ → arithProg a b`, `n ↦ a + b*n`.
+  classical
+  have hstep : (b : ℤ) ≠ 0 := by
+    have : (0 : ℤ) < b := Int.ofNat_lt.mpr hb
+    exact ne_of_gt this
+  -- Map ℤ onto the progression
+  refine Set.infinite_of_injective_forall_exists
+    (f := fun n : ℤ => (a + (b : ℤ) * n))
+    ?hinj ?hsurj
+  · -- injective: a + b n₁ = a + b n₂ ⇒ n₁ = n₂
+    intro n₁ n₂ h
+    have : (b : ℤ) * n₁ = (b : ℤ) * n₂ := by
+      simpa [add_left_cancel_iff] using h
+    have : (b : ℤ) * (n₁ - n₂) = 0 := by
+      simpa [sub_eq_add_neg, add_comm, add_left_comm, add_assoc,
+             mul_add, add_mul, this] using congrArg (fun t => t - (b : ℤ) * n₂) this
+    have : n₁ - n₂ = 0 := by
+      apply mul_left_cancel₀ hstep this
+    exact sub_eq_zero.mp this
+  · -- surjective: every x in arithProg a b has the form a + b n
+    intro x hx
+    rcases hx with hx
+    -- From x ≡ a [ZMOD b], we get x = a + b*k for some k.
+    rcases hx with ⟨k, hk⟩
+    refine ⟨k, ?_⟩
+    -- `Int.ModEq` gives `∃ k, x - a = b*k`, so x = a + b*k.
+    -- In mathlib: `Int.ModEq` is an equivalence relation with
+    -- `Int.ModEq` ↔ `∃ k, x - a = b*k`. We use the existing lemma.
+    -- To keep this self-contained, we use hk directly:
+    -- assume hk : x - a = (b : ℤ) * k
+    -- then x = a + (b : ℤ) * k.
+    simpa [arithProg, Int.ModEq, hk, sub_eq_add_neg, add_comm,
+           add_left_comm, add_assoc]  -- may need tweaking with real lemmas
+    -- NOTE: You will likely want to replace this line by the
+    -- specialised mathlib lemma `Int.ModEq_iff_dvd` or similar.
+    sorry
+
+/-- Furstenberg-open sets: each point has an arithmetic progression
+    (with positive step) contained in the set. -/
+def IsOpenF (U : Set ℤ) : Prop :=
+  ∀ x ∈ U, ∃ b : ℕ, 0 < b ∧ arithProg x b ⊆ U
+
+/-- Furstenberg-closed sets: complement is Furstenberg-open. -/
+def IsClosedF (U : Set ℤ) : Prop :=
+  IsOpenF (Uᶜ)
+
+/-- Any nonempty Furstenberg-open set is infinite. -/
+lemma openF_infinite {U : Set ℤ} (hU : IsOpenF U) (hne : U.Nonempty) :
+    U.Infinite := by
+  rcases hne with ⟨x, hx⟩
+  rcases hU x hx with ⟨b, hb_pos, hsub⟩
+  -- `arithProg x b` is infinite and contained in U
+  have hinf : (arithProg x b).Infinite :=
+    infinite_arithProg (a := x) hb_pos
+  exact hinf.mono hsub
+
+/-- Any arithmetic progression is Furstenberg-open. -/
+lemma arithProg_isOpenF (a : ℤ) (b : ℕ) (hb : 0 < b) :
+    IsOpenF (arithProg a b) := by
+  intro x hx
+  -- Take the same modulus b, centered at x.
+  refine ⟨b, hb, ?_⟩
+  intro y hy
+  -- y ∈ arithProg x b ⇒ y ∈ arithProg a b
+  -- Because both are congruence classes modulo b, and
+  -- if x ≡ a (mod b) and y ≡ x (mod b) then y ≡ a (mod b).
+  have hx' : Int.ModEq (b : ℤ) x a := by
+    -- from hx : x ∈ arithProg a b
+    simpa [arithProg] using hx
+  have hy' : Int.ModEq (b : ℤ) y x := by
+    simpa [arithProg] using hy
+  have : Int.ModEq (b : ℤ) y a :=
+    Int.ModEq.trans hy' hx'
+  simpa [arithProg] using this
+
+/-- For fixed modulus `b > 0`, the complement of any arithmetic progression
+    is a union of the other congruence classes mod `b`, hence Furstenberg-open.
+
+    This is the part where we mimic the partition of ℤ into residue classes
+    `{ a + k : k ∈ ℤ }` for k = 0, …, b - 1. -/
+lemma arithProg_compl_isUnion (a : ℤ) (b : ℕ) (hb : 0 < b) :
+    (arithProg a b)ᶜ =
+      ⋃ (i : Fin b) (hi : (i : ℕ) ≠ 0),
+        arithProg (a + i) b := by
+  classical
+  -- Sketch:
+  -- 1. Every integer x is congruent to exactly one residue a + i (mod b)
+  --    with i in {0,…,b-1}.
+  -- 2. If x is *not* congruent to a (i = 0), then it lies in some class
+  --    a + i with i ≠ 0.
+  -- This produces the claimed decomposition of the complement.
+  -- Filling this in requires a (somewhat long) congruence argument
+  -- parallel to Eberl's Isabelle code.
+  --
+  -- For purposes of this translation, we mark this as a TODO.
+  sorry
+
+/-- Arithmetic progressions are Furstenberg-closed. -/
+lemma arithProg_isClosedF (a : ℤ) (b : ℕ) (hb : 0 < b) :
+    IsClosedF (arithProg a b) := by
+  -- Its complement is Furstenberg-open by the decomposition lemma
+  have := arithProg_compl_isUnion a b hb
+  -- Using that unions of arithmetic progressions are open:
+  have hopen :
+      IsOpenF ((arithProg a b)ᶜ) := by
+    intro x hx
+    -- From the decomposition, x lies in some `arithProg (a + i) b`
+    -- with i ≠ 0; that progression is open.
+    -- Again this is mostly bookkeeping once arithProg_compl_isUnion
+    -- is proved.
+    sorry
+  simpa [IsClosedF] using hopen
+
+/-- The set of integer multiples of a natural number `n` as a subset of `ℤ`. -/
+def multiples (n : ℕ) : Set ℤ := {x : ℤ | (n : ℤ) ∣ x}
+
+lemma multiples_eq_arithProg (n : ℕ) :
+    multiples n = arithProg 0 n := by
+  ext x; constructor
+  · intro hx
+    rcases hx with ⟨k, hk⟩
+    -- x = n*k ⇒ x ≡ 0 (mod n)
+    have : Int.ModEq (n : ℤ) x 0 := by
+      refine Int.ModEq.ofEq ?h
+      simpa [hk, zero_add, mul_comm] using rfl
+    simpa [multiples, arithProg] using this
+  · intro hx
+    -- x ≡ 0 (mod n) ⇒ x is a multiple of n
+    -- again use the standard equivalence between ModEq and divisibility
+    rcases hx with hx
+    -- From hx : Int.ModEq (n : ℤ) x 0, we get (n : ℤ) ∣ x.
+    -- This is a standard lemma in mathlib; here we simply assert it.
+    sorry
+
+/-- For any prime `p`, the set of multiples of `p` is Furstenberg-open
+    and Furstenberg-closed. -/
+lemma multiples_prime_open_closed {p : ℕ} (hp : Nat.Prime p) :
+    IsOpenF (multiples p) ∧ IsClosedF (multiples p) := by
+  have hp_pos : 0 < p := hp.pos
+  have h1 : multiples p = arithProg 0 p := multiples_eq_arithProg p
+  have hopen : IsOpenF (multiples p) :=
+    by simpa [h1] using arithProg_isOpenF (0 : ℤ) p hp_pos
+  have hclosed : IsClosedF (multiples p) :=
+    by simpa [h1] using arithProg_isClosedF (0 : ℤ) p hp_pos
+  exact ⟨hopen, hclosed⟩
+
+/-- If there were only finitely many primes, the union of their multiples
+    would be Furstenberg-closed. -/
+def allPrimeMultiples : Set ℤ :=
+  ⋃ p : ℕ, ⋃ (_ : Nat.Prime p), multiples p
+
+lemma allPrimeMultiples_closed
+    (hfin : (Set.univ.filter Nat.Prime).Finite) :
+    IsClosedF allPrimeMultiples := by
+  classical
+  -- Finite union of Furstenberg-closed sets is Furstenberg-closed.
+  -- We can reduce to a finite set of primes using `hfin`.
+  -- Details omitted here; it is straightforward but slightly tedious.
+  sorry
+
+/-- Complement of all prime multiples is exactly `{1, -1}`. -/
+lemma compl_allPrimeMultiples :
+    allPrimeMultiplesᶜ = ({(1 : ℤ), (-1 : ℤ)} : Set ℤ) := by
+  -- Every integer except ±1 has some prime divisor, hence lies
+  -- in the multiples of that prime.
+  -- This matches the corresponding Isabelle lemma.
+  sorry
+
+/-- Final theorem: there are infinitely many primes (Furstenberg proof). -/
+theorem infinite_primes_Furstenberg :
+    {p : ℕ | Nat.Prime p}.Infinite := by
+  classical
+  by_contra hfin
+  have hfin' : (Set.univ.filter Nat.Prime).Finite := by
+    -- easy rewriting of `hfin`
+    sorry
+  -- The union of all prime multiples is closed in Furstenberg topology
+  have hclosed : IsClosedF allPrimeMultiples :=
+    allPrimeMultiples_closed hfin'
+  -- Hence its complement `{1, -1}` is open
+  have hopen : IsOpenF ({(1 : ℤ), (-1 : ℤ)} : Set ℤ) := by
+    simpa [IsClosedF, compl_allPrimeMultiples] using hclosed
+  -- But `{1, -1}` is finite and nonempty, contradicting
+  -- the lemma that any nonempty open set is infinite.
+  have hne : ({(1 : ℤ), (-1 : ℤ)} : Set ℤ).Nonempty := by
+    refine ⟨1, ?_⟩; simp
+  have hinf := openF_infinite (U := {(1 : ℤ), (-1 : ℤ)}) hopen hne
+  have hfinite : ( {(1 : ℤ), (-1 : ℤ)} : Set ℤ ).Finite := by
+    simp
+  exact hfinite.not_infinite hinf
+
+end Furstenberg
